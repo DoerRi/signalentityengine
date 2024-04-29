@@ -1,8 +1,4 @@
-/*
-IDEA:
-    Enitity comunicate via Signals
 
-*/
 use std::sync::mpsc::{self, *};
 use std::thread::{self, *};
 
