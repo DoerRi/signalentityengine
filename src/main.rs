@@ -3,8 +3,6 @@ IDEA:
     Enitity comunicate via Signals
 
 */
-
-use std::cell::Ref;
 use std::sync::mpsc::{self, *};
 use std::thread::{self, *};
 
@@ -14,35 +12,46 @@ fn main() {
 }
 
 //has a channel for comunication to the app and or to all threads
-struct AppEntryPoint{
-
-}
+struct AppEntryPoint {}
 
 struct App {
-    threads:Vec<SignalThread>,
-    enititys: Vec<Enitity>,
+    joinhandler: Vec<JoinHandle<()>>,
+    enititys: Vec<Entity>,
 }
 impl App {
-    fn new(thread_count:u16) -> AppEntryPoint {
-        let mut receivers:Vec<Receiver<Signal>>=vec![];
-        let mut senders:Vec<Sender<Signal>>=vec![];
-        for i in 0..thread_count{
+    fn new(thread_count: u16) -> AppEntryPoint {
+        //creating the channels
+        let mut receivers: Vec<Receiver<Signal>> = vec![];
+        let mut senders: Vec<Sender<Signal>> = vec![];
+        for _i in 0..thread_count {
             let (send, rece): (Sender<Signal>, Receiver<Signal>) = mpsc::channel();
             receivers.push(rece);
             senders.push(send)
         }
-        let mut threads:Vec<SignalThread>=vec![];
-        static  mut app: App= App { threads: vec![], enititys: vec![]};
-        for i in 0..thread_count{
-            threads.push(SignalThread::new(unsafe { &mut app }, receivers.pop().unwrap(), senders.clone(), i));
+        //createing the app and SignalThread objects
+        let mut threads: Vec<SignalThread> = vec![];
+        static mut APP: App = App {
+            enititys: vec![],
+            joinhandler: vec![],
+        };
+        for i in 0..thread_count {
+            threads.push(SignalThread::new(
+                unsafe { &mut APP },
+                receivers.pop().unwrap(),
+                senders.clone(),
+                i,
+            ));
         }
-        unsafe { app.threads=threads };
-        for i in 0..thread_count{
-            let thisthread=unsafe { app.threads.get(i as usize).unwrap() };
-            thread::spawn(move || thisthread.thread_fn());
+        //starting the threads
+        for _i in 0..thread_count {
+            let thisthread = threads.pop().unwrap(); //unsafe { app.threads.get(i as usize).unwrap() };
+            unsafe {
+                APP.joinhandler
+                    .push(thread::spawn(move || thisthread.thread_fn()))
+            };
         }
 
-        AppEntryPoint {  }
+        AppEntryPoint {}
     }
 }
 
@@ -68,34 +77,40 @@ impl SignalThread {
     }
     fn thread_fn(mut self) {
         loop {
-            let (tx, rx): (Sender<Signal>, Receiver<Signal>) = mpsc::channel();
+            //fetch signal and test if it is valid
+            let (send, rece): (Sender<Signal>, Receiver<Signal>) = mpsc::channel();
             let signal: Signal = self.srece.recv().unwrap();
-            if signal.to as usize % self.app.threads.len() != self.id as usize {
+            if signal.to as usize % self.app.joinhandler.len() != self.id as usize {
                 continue;
             }
+            //start signal handler of entity
             self.app
                 .enititys
                 .get(signal.to as usize)
                 .unwrap()
-                .handle_signal(signal, tx);
-            rx.into_iter().for_each(|s| self.send_signal(s));
+                .handle_signal(signal, send);
+            //sending generated signals
+            rece.into_iter().for_each(|s| self.send_signal(s));
         }
     }
     fn send_signal(&mut self, signal: Signal) {
         let _ = self
             .ssend
-            .get(signal.to as usize % self.app.threads.len())
+            .get(signal.to as usize % self.app.joinhandler.len())
             .unwrap()
             .send(signal);
     }
 }
 
+unsafe impl Sync for SignalThread {}
+unsafe impl Send for SignalThread {}
+
 //holds data for the thread and the enitiy data
-struct Enitity {
+struct Entity {
     id: u64,
-    enitity_data: Box<dyn EnitityData>,
+    enitity_data: Box<dyn EntityData>,
 }
-impl Enitity {
+impl Entity {
     fn handle_signal(&self, signal: Signal, send_signal_queue: Sender<Signal>) {
         match signal.signaltype {
             SignalType::Init => self.enitity_data.init(send_signal_queue),
@@ -110,10 +125,10 @@ impl Enitity {
         }
     }
     fn delete(&self) {}
-    fn add_new_enitiy(&self, enitity: &Enitity) {}
+    fn add_new_enitiy(&self, enitity: &Entity) {}
 }
 
-trait EnitityData {
+trait EntityData {
     fn handle_signal(&self, id: u64, data: Box<dyn SignalData>, signal_queue: Sender<Signal>);
     fn update(&self, delta: f64, signal_queue: Sender<Signal>);
     fn init(&self, signal_queue: Sender<Signal>);
