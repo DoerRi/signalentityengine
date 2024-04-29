@@ -105,7 +105,8 @@ impl SignalThread {
 unsafe impl Sync for SignalThread {}
 unsafe impl Send for SignalThread {}
 
-//holds data for the thread and the enitiy data
+//Entity holds data and 
+//  id = unic identifier & indicates which thread is responsible (thread_id = id % thread_count)
 struct Entity {
     id: u64,
     enitity_data: Box<dyn EntityData>,
@@ -113,12 +114,14 @@ struct Entity {
 impl Entity {
     fn handle_signal(&self, signal: Signal, send_signal_queue: Sender<Signal>) {
         match signal.signaltype {
+            //standart signals
             SignalType::Init => self.enitity_data.init(send_signal_queue),
             SignalType::Update(delta) => self.enitity_data.update(delta, send_signal_queue),
             SignalType::Delete() => {
                 self.enitity_data.delete(send_signal_queue);
                 self.delete();
             }
+            //custom signals
             SignalType::CustomData(id, data) => {
                 self.enitity_data.handle_signal(id, data, send_signal_queue)
             }
