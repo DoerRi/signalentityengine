@@ -105,6 +105,8 @@ impl SignalThread {
 unsafe impl Sync for SignalThread {}
 unsafe impl Send for SignalThread {}
 
+
+
 //Entity holds data and 
 //  id = unic identifier & indicates which thread is responsible (thread_id = id % thread_count)
 struct Entity {
