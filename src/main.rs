@@ -1,0 +1,137 @@
+/*
+IDEA:
+    Enitity comunicate via Signals
+
+*/
+
+use std::cell::Ref;
+use std::sync::mpsc::{self, *};
+use std::thread::{self, *};
+
+fn main() {
+    println!("Hello, world!");
+    let app = App::new(4);
+}
+
+//has a channel for comunication to the app and or to all threads
+struct AppEntryPoint{
+
+}
+
+struct App {
+    threads:Vec<SignalThread>,
+    enititys: Vec<Enitity>,
+}
+impl App {
+    fn new(thread_count:u16) -> AppEntryPoint {
+        let mut receivers:Vec<Receiver<Signal>>=vec![];
+        let mut senders:Vec<Sender<Signal>>=vec![];
+        for i in 0..thread_count{
+            let (send, rece): (Sender<Signal>, Receiver<Signal>) = mpsc::channel();
+            receivers.push(rece);
+            senders.push(send)
+        }
+        let mut threads:Vec<SignalThread>=vec![];
+        static  mut app: App= App { threads: vec![], enititys: vec![]};
+        for i in 0..thread_count{
+            threads.push(SignalThread::new(unsafe { &mut app }, receivers.pop().unwrap(), senders.clone(), i));
+        }
+        unsafe { app.threads=threads };
+        for i in 0..thread_count{
+            let thisthread=unsafe { app.threads.get(i as usize).unwrap() };
+            thread::spawn(move || thisthread.thread_fn());
+        }
+
+        AppEntryPoint {  }
+    }
+}
+
+struct SignalThread {
+    id: u16,
+    app: &'static mut App,
+    srece: Receiver<Signal>,
+    ssend: Vec<Sender<Signal>>,
+}
+impl SignalThread {
+    fn new(
+        app: &'static mut App,
+        srece: Receiver<Signal>,
+        ssend: Vec<Sender<Signal>>,
+        id: u16,
+    ) -> Self {
+        SignalThread {
+            app,
+            srece,
+            ssend,
+            id,
+        }
+    }
+    fn thread_fn(mut self) {
+        loop {
+            let (tx, rx): (Sender<Signal>, Receiver<Signal>) = mpsc::channel();
+            let signal: Signal = self.srece.recv().unwrap();
+            if signal.to as usize % self.app.threads.len() != self.id as usize {
+                continue;
+            }
+            self.app
+                .enititys
+                .get(signal.to as usize)
+                .unwrap()
+                .handle_signal(signal, tx);
+            rx.into_iter().for_each(|s| self.send_signal(s));
+        }
+    }
+    fn send_signal(&mut self, signal: Signal) {
+        let _ = self
+            .ssend
+            .get(signal.to as usize % self.app.threads.len())
+            .unwrap()
+            .send(signal);
+    }
+}
+
+//holds data for the thread and the enitiy data
+struct Enitity {
+    id: u64,
+    enitity_data: Box<dyn EnitityData>,
+}
+impl Enitity {
+    fn handle_signal(&self, signal: Signal, send_signal_queue: Sender<Signal>) {
+        match signal.signaltype {
+            SignalType::Init => self.enitity_data.init(send_signal_queue),
+            SignalType::Update(delta) => self.enitity_data.update(delta, send_signal_queue),
+            SignalType::Delete() => {
+                self.enitity_data.delete(send_signal_queue);
+                self.delete();
+            }
+            SignalType::CustomData(id, data) => {
+                self.enitity_data.handle_signal(id, data, send_signal_queue)
+            }
+        }
+    }
+    fn delete(&self) {}
+    fn add_new_enitiy(&self, enitity: &Enitity) {}
+}
+
+trait EnitityData {
+    fn handle_signal(&self, id: u64, data: Box<dyn SignalData>, signal_queue: Sender<Signal>);
+    fn update(&self, delta: f64, signal_queue: Sender<Signal>);
+    fn init(&self, signal_queue: Sender<Signal>);
+    fn delete(&self, signal_queue: Sender<Signal>);
+}
+
+struct Signal {
+    to: u64,
+    from: u64,
+    signaltype: SignalType,
+}
+enum SignalType {
+    Init,
+    Update(f64),
+    Delete(),
+    CustomData(u64, Box<dyn SignalData>),
+}
+
+trait SignalData {
+    fn get_data(&self) {}
+}
